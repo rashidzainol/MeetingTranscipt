@@ -1,9 +1,11 @@
-# Core transcription (choose one)
+# Transcription backend
 faster-whisper>=1.0.0
-# openai-whisper>=20231117
 
 # Audio handling
 pydub>=0.25.1
+
+# Date picker
+tkcalendar>=1.6.1
 
 # Optional: speaker diarization
 # pyannote.audio>=3.1

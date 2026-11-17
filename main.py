@@ -4,6 +4,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
 import webbrowser
+from tkcalendar import DateEntry
 from datetime import datetime
 from meeting_transcriber import MeetingTranscriber
 
@@ -50,14 +51,17 @@ class MeetingTranscriberApp:
         self.meeting_name_entry.grid(row=2, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         ttk.Label(main_frame, text="Meeting Date:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        self.meeting_date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
-        self.meeting_date_entry = ttk.Entry(main_frame, textvariable=self.meeting_date_var, width=50)
-        self.meeting_date_entry.grid(row=3, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.meeting_date_entry = DateEntry(main_frame, width=20, date_pattern='yyyy-mm-dd')
+        self.meeting_date_entry.grid(row=3, column=1, sticky=tk.W, pady=5)
 
-        ttk.Label(main_frame, text="Start Time (HH:MM):").grid(row=4, column=0, sticky=tk.W, pady=5)
-        self.start_time_var = tk.StringVar(value=datetime.now().strftime("%H:%M"))
-        self.start_time_entry = ttk.Entry(main_frame, textvariable=self.start_time_var, width=50)
-        self.start_time_entry.grid(row=4, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        ttk.Label(main_frame, text="Start Time:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        time_frame = ttk.Frame(main_frame)
+        time_frame.grid(row=4, column=1, sticky=tk.W, pady=5)
+        self.start_hour_var = tk.StringVar(value=datetime.now().strftime("%H"))
+        self.start_minute_var = tk.StringVar(value=datetime.now().strftime("%M"))
+        ttk.Spinbox(time_frame, from_=0, to=23, width=4, textvariable=self.start_hour_var, format="%02.0f").pack(side=tk.LEFT)
+        ttk.Label(time_frame, text=":").pack(side=tk.LEFT)
+        ttk.Spinbox(time_frame, from_=0, to=59, width=4, textvariable=self.start_minute_var, format="%02.0f").pack(side=tk.LEFT)
 
         ttk.Label(main_frame, text="Participants:").grid(row=5, column=0, sticky=tk.W, pady=5)
         self.participants_var = tk.StringVar()
@@ -76,6 +80,7 @@ class MeetingTranscriberApp:
                                   values=["tiny", "base", "small", "medium", "large"], 
                                   state="readonly", width=15)
         model_combo.grid(row=0, column=1, sticky=tk.W, pady=2)
+        ttk.Label(settings_frame, text="Larger = more accurate but slower (tiny/base/small/medium/large)", foreground='gray', font=('Arial', 8)).grid(row=0, column=2, sticky=tk.W, pady=2)
         
         # Chunk size
         ttk.Label(settings_frame, text="Chunk Size (minutes):").grid(row=1, column=0, sticky=tk.W, pady=2)
@@ -191,8 +196,8 @@ class MeetingTranscriberApp:
             audio_file = self.file_path_var.get()
             meeting_name = self.meeting_name_var.get() or os.path.splitext(os.path.basename(audio_file))[0]
             chunk_size = int(self.chunk_size_var.get())
-            meeting_date = self.meeting_date_var.get()
-            start_time = self.start_time_var.get()
+            meeting_date = self.meeting_date_entry.get()
+            start_time = f"{int(self.start_hour_var.get()):02d}:{int(self.start_minute_var.get()):02d}"
             participants = [p.strip() for p in self.participants_var.get().split(",") if p.strip()]
             
             self.log_message(f"Starting transcription for: {meeting_name}")
