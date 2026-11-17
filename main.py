@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
+import webbrowser
 from datetime import datetime
 from meeting_transcriber import MeetingTranscriber
 
@@ -121,6 +122,9 @@ class MeetingTranscriberApp:
         self.clear_log_btn = ttk.Button(button_frame, text="Clear Log", 
                                        command=self.clear_log)
         self.clear_log_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.about_btn = ttk.Button(button_frame, text="About", command=self.show_about)
+        self.about_btn.pack(side=tk.LEFT, padx=5)
         
         # Configure row weights for proper resizing
         main_frame.rowconfigure(9, weight=1)
@@ -244,6 +248,18 @@ class MeetingTranscriberApp:
             editor_app = TranscriptEditor(editor_window, transcript_path=path)
         except Exception as e:
             messagebox.showerror("Error", f"Cannot open editor: {str(e)}")
+
+    def show_about(self):
+        about = tk.Toplevel(self.root)
+        about.title("About Meeting Transcriber")
+        about.geometry("420x260")
+        ttk.Label(about, text="Meeting Transcriber v1.0", font=("Arial", 14, "bold")).pack(pady=(15,5))
+        ttk.Label(about, text="Transcribe meetings with timestamps (EN/BM).").pack()
+        ttk.Label(about, text="Developer: Rashid Zainol - JANN Sarawak").pack(pady=5)
+        link = ttk.Label(about, text="GitHub: rashidzainol/MeetingTranscipt", foreground="blue", cursor="hand2")
+        link.pack(pady=5)
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/rashidzainol/MeetingTranscipt"))
+        ttk.Button(about, text="Close", command=about.destroy).pack(pady=10)
 
 if __name__ == "__main__":
     root = tk.Tk()
