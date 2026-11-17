@@ -2,6 +2,8 @@
 
 import os
 import json
+import time
+import threading
 from datetime import datetime, timedelta
 
 
@@ -11,11 +13,23 @@ class MeetingTranscriber:
         self.language = language  # 'en', 'ms', or 'auto'
         self.progress_callback = progress_callback
         self.model = None
+        self.backend = None
+        self.stop_event = None
         self._load_model()
 
     def _log(self, msg):
         if self.progress_callback:
-            self.progress_callback(msg)
+            try:
+                self.progress_callback({"type": "log", "message": msg})
+            except Exception:
+                pass
+
+    def _progress(self, pct, msg):
+        if self.progress_callback:
+            try:
+                self.progress_callback({"type": "progress", "percent": pct, "message": msg})
+            except Exception:
+                pass
 
     def _load_model(self):
         self._log(f"Loading Whisper model '{self.model_size}'...")
@@ -34,9 +48,30 @@ class MeetingTranscriber:
                 )
         self._log("Model loaded.")
 
+    def _audio_duration(self, path):
+        try:
+            import av
+            container = av.open(path)
+            if container.duration is not None:
+                return container.duration / 1_000_000.0
+            # fallback: last frame
+            stream = container.streams.audio[0]
+            if stream.duration is not None:
+                return float(stream.duration * stream.time_base)
+        except Exception:
+            pass
+        try:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(path)
+            return len(audio) / 1000.0
+        except Exception:
+            return 0.0
+
     def transcribe_meeting(self, audio_path, meeting_name, chunk_length_min=5,
-                           meeting_date=None, start_time=None, participants=None):
+                           meeting_date=None, start_time=None, participants=None,
+                           stop_event=None):
         """Transcribe an audio file and return a structured result dict."""
+        self.stop_event = stop_event
         if meeting_date is None:
             meeting_date = datetime.now().strftime("%Y-%m-%d")
         if start_time is None:
@@ -44,29 +79,59 @@ class MeetingTranscriber:
 
         self._log(f"Transcribing: {os.path.basename(audio_path)}")
 
+        duration = self._audio_duration(audio_path)
+        self._log(f"Audio duration: {round(duration/60, 1)} min")
+
         lang = None if self.language == "auto" else self.language
 
         segments = []
+        detected_lang = self.language
+        cancelled = False
+        t0 = time.time()
+
         if self.backend == "faster":
             segs, info = self.model.transcribe(audio_path, language=lang, beam_size=5)
+            detected_lang = info.language
             for s in segs:
+                if stop_event is not None and stop_event.is_set():
+                    cancelled = True
+                    break
                 segments.append({
                     "start": round(s.start, 2),
                     "end": round(s.end, 2),
                     "text": s.text.strip(),
                 })
-            detected_lang = info.language
+                if duration > 0:
+                    pct = min(99, int((s.end / duration) * 100))
+                    elapsed = time.time() - t0
+                    if s.end > 0 and elapsed > 0:
+                        speed = s.end / elapsed
+                        remaining = max(0, (duration - s.end) / speed)
+                        eta = time.strftime("%M:%S", time.gmtime(remaining))
+                    else:
+                        eta = "--:--"
+                    self._progress(pct, f"Transcribing... {pct}% (ETA {eta})")
         else:
+            self._progress(10, "Transcribing (openai-whisper)...")
             result = self.model.transcribe(audio_path, language=lang)
             for s in result.get("segments", []):
+                if stop_event is not None and stop_event.is_set():
+                    cancelled = True
+                    break
                 segments.append({
                     "start": round(s["start"], 2),
                     "end": round(s["end"], 2),
                     "text": s["text"].strip(),
                 })
             detected_lang = result.get("language", self.language)
+            self._progress(95, "Finalizing...")
 
-        # Compute end time from audio duration (last segment end)
+        if cancelled:
+            self._log("Transcription cancelled by user.")
+            raise RuntimeError("Cancelled by user")
+
+        self._progress(100, "Done")
+
         duration_sec = segments[-1]["end"] if segments else 0
         try:
             start_dt = datetime.strptime(f"{meeting_date} {start_time}", "%Y-%m-%d %H:%M")
@@ -109,8 +174,8 @@ class MeetingTranscriber:
         lines.append("")
         lines.append("## Meeting Details")
         lines.append("")
-        lines.append(f"| Field | Value |")
-        lines.append(f"|---|---|")
+        lines.append("| Field | Value |")
+        lines.append("|---|---|")
         lines.append(f"| **Date** | {result['meeting_date']} |")
         lines.append(f"| **Start Time** | {result['start_time']} |")
         lines.append(f"| **End Time** | {result['end_time']} |")

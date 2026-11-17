@@ -125,8 +125,11 @@ class MeetingTranscriberApp:
         self.progress_label = ttk.Label(progress_frame, textvariable=self.progress_var)
         self.progress_label.grid(row=0, column=0, sticky=tk.W)
         
-        self.progress = ttk.Progressbar(progress_frame, mode='indeterminate')
+        self.progress = ttk.Progressbar(progress_frame, mode='determinate', maximum=100)
         self.progress.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        
+        self.stop_btn = ttk.Button(progress_frame, text="⏹ Stop", command=self.stop_transcription, state="disabled")
+        self.stop_btn.grid(row=1, column=1, padx=(8,0), pady=5)
         
         # Log output
         ttk.Label(main_frame, text="Processing Log:").grid(row=8, column=0, sticky=tk.W, pady=(10, 0))
@@ -200,7 +203,9 @@ class MeetingTranscriberApp:
         # Disable buttons during processing
         self.transcribe_btn.config(state="disabled")
         self.browse_btn.config(state="disabled")
-        self.progress.start()
+        self.stop_btn.config(state="normal")
+        self.progress.config(value=0)
+        self.stop_event = threading.Event()
         
         # Start transcription in separate thread
         thread = threading.Thread(target=self.run_transcription)
@@ -238,7 +243,8 @@ class MeetingTranscriberApp:
                 chunk_length_min=chunk_size,
                 meeting_date=meeting_date,
                 start_time=start_time,
-                participants=participants
+                participants=participants,
+                stop_event=self.stop_event
             )
             
             self.log_message("-" * 50)
@@ -268,13 +274,29 @@ class MeetingTranscriberApp:
             # Re-enable buttons
             self.transcribe_btn.config(state="normal")
             self.browse_btn.config(state="normal")
-            self.progress.stop()
+            self.stop_btn.config(state="disabled")
             self.progress_var.set("Ready")
     
-    def update_progress(self, message):
+    def update_progress(self, payload):
         """Update progress from transcriber"""
-        self.progress_var.set(message)
-        self.log_message(message)
+        if isinstance(payload, dict):
+            if payload.get("type") == "log":
+                self.log_message(payload.get("message", ""))
+                return
+            if payload.get("type") == "progress":
+                pct = payload.get("percent", 0)
+                msg = payload.get("message", "")
+                try:
+                    self.progress.config(value=pct)
+                except Exception:
+                    pass
+                self.progress_var.set(f"{msg}")
+                self.log_message(msg)
+                return
+        # fallback: string
+        msg = str(payload)
+        self.progress_var.set(msg)
+        self.log_message(msg)
     
     def open_editor(self):
         """Open the transcript editor"""
@@ -359,6 +381,11 @@ class MeetingTranscriberApp:
             messagebox.showinfo("Copied", "Log copied to clipboard.")
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+    def stop_transcription(self):
+        if getattr(self, "stop_event", None):
+            self.stop_event.set()
+            self.log_message("Stop requested...")
 
     def show_about(self):
         about = tk.Toplevel(self.root)
