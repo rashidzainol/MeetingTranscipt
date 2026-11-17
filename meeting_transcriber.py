@@ -105,26 +105,102 @@ class MeetingTranscriber:
     @staticmethod
     def to_markdown(result):
         lines = []
-        lines.append(f"# Meeting Minutes — {result['meeting_name']}")
+        lines.append(f"# MEETING MINUTES — {result['meeting_name'].upper()}")
         lines.append("")
-        lines.append(f"- **Date:** {result['meeting_date']}")
-        lines.append(f"- **Start:** {result['start_time']}   **End:** {result['end_time']}")
-        lines.append(f"- **Duration:** {round(result['duration_seconds']/60, 1)} min")
-        lines.append(f"- **Language:** {result['detected_language']}")
+        lines.append("## Meeting Details")
+        lines.append("")
+        lines.append(f"| Field | Value |")
+        lines.append(f"|---|---|")
+        lines.append(f"| **Date** | {result['meeting_date']} |")
+        lines.append(f"| **Start Time** | {result['start_time']} |")
+        lines.append(f"| **End Time** | {result['end_time']} |")
+        lines.append(f"| **Duration** | {round(result['duration_seconds']/60, 1)} minutes |")
+        lines.append(f"| **Language** | {result['detected_language']} |")
         if result.get("participants"):
-            lines.append(f"- **Participants:** {', '.join(result['participants'])}")
+            lines.append(f"| **Participants** | {', '.join(result['participants'])} |")
         lines.append("")
-        lines.append("## Transcript")
+        lines.append("## Agenda")
+        lines.append("")
+        lines.append("1. _(Add agenda items here)_")
+        lines.append("")
+        lines.append("## Discussion / Perbincangan")
         lines.append("")
         for seg in result["segments"]:
-            ts = self._fmt_ts(seg["start"]) if False else MeetingTranscriber._fmt_ts(seg["start"])
+            ts = MeetingTranscriber._fmt_ts(seg["start"])
             lines.append(f"[{ts}] {seg['text']}")
         lines.append("")
-        lines.append("## Minutes / Action Items")
+        lines.append("## Decisions / Keputusan")
         lines.append("")
-        lines.append("_(Fill in decisions and action items here.)_")
+        lines.append("- _(Record decisions here)_")
+        lines.append("")
+        lines.append("## Action Items / Tindakan")
+        lines.append("")
+        lines.append("| # | Action | Owner | Due Date | Status |")
+        lines.append("|---|---|---|---|---|")
+        lines.append("| 1 | _(action)_ | _(owner)_ | _(date)_ | Pending |")
+        lines.append("")
+        lines.append("## Next Meeting")
+        lines.append("")
+        lines.append("_(Date/time of next meeting)_")
         lines.append("")
         return "\n".join(lines)
+
+    @staticmethod
+    def export_docx(result, path):
+        try:
+            from docx import Document
+        except Exception:
+            raise RuntimeError("python-docx not installed. Run: pip install python-docx")
+        doc = Document()
+        doc.add_heading(f"Meeting Minutes — {result['meeting_name']}", 0)
+        table = doc.add_table(rows=0, cols=2)
+        table.style = 'Table Grid'
+        for k, v in [
+            ("Date", result['meeting_date']),
+            ("Start Time", result['start_time']),
+            ("End Time", result['end_time']),
+            ("Duration", f"{round(result['duration_seconds']/60,1)} min"),
+            ("Language", result['detected_language']),
+            ("Participants", ", ".join(result.get('participants', []))),
+        ]:
+            row = table.add_row().cells
+            row[0].text = k
+            row[1].text = str(v)
+        doc.add_heading("Transcript", level=1)
+        for seg in result["segments"]:
+            p = doc.add_paragraph()
+            p.add_run(f"[{MeetingTranscriber._fmt_ts(seg['start'])}] ").bold = True
+            p.add_run(seg["text"])
+        doc.add_heading("Minutes / Action Items", level=1)
+        doc.add_paragraph("Decisions and action items to be filled in.")
+        doc.save(path)
+
+    @staticmethod
+    def export_pdf(result, path):
+        try:
+            from fpdf import FPDF
+        except Exception:
+            raise RuntimeError("fpdf2 not installed. Run: pip install fpdf2")
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, f"Meeting Minutes - {result['meeting_name']}", ln=True)
+        pdf.set_font("Helvetica", size=11)
+        for k, v in [
+            ("Date", result['meeting_date']),
+            ("Start", result['start_time']),
+            ("End", result['end_time']),
+            ("Duration", f"{round(result['duration_seconds']/60,1)} min"),
+            ("Language", result['detected_language']),
+        ]:
+            pdf.cell(0, 8, f"{k}: {v}", ln=True)
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Transcript", ln=True)
+        pdf.set_font("Helvetica", size=10)
+        for seg in result["segments"]:
+            pdf.multi_cell(0, 6, f"[{MeetingTranscriber._fmt_ts(seg['start'])}] {seg['text']}")
+        pdf.output(path)
 
     @staticmethod
     def _fmt_ts(seconds):

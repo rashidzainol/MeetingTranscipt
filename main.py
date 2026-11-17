@@ -151,6 +151,11 @@ class MeetingTranscriberApp:
 
         self.copy_log_btn = ttk.Button(button_frame, text="📋 Copy Log", command=self.copy_log)
         self.copy_log_btn.pack(side=tk.LEFT, padx=5)
+
+        self.export_docx_btn = ttk.Button(button_frame, text="📄 Word", command=self.export_docx, state="disabled")
+        self.export_docx_btn.pack(side=tk.LEFT, padx=5)
+        self.export_pdf_btn = ttk.Button(button_frame, text="📑 PDF", command=self.export_pdf, state="disabled")
+        self.export_pdf_btn.pack(side=tk.LEFT, padx=5)
         
         # Configure row weights for proper resizing
         main_frame.rowconfigure(9, weight=1)
@@ -245,6 +250,9 @@ class MeetingTranscriberApp:
             
             # Enable editor button
             self.open_editor_btn.config(state="normal")
+            self.export_docx_btn.config(state="normal")
+            self.export_pdf_btn.config(state="normal")
+            self.last_result = result
             self.last_transcript_path = os.path.join(result['output_folder'], f"{meeting_name}_transcript.json")
             
             messagebox.showinfo("Success", "Transcription completed successfully!")
@@ -278,12 +286,68 @@ class MeetingTranscriberApp:
         except Exception as e:
             messagebox.showerror("Error", f"Cannot open editor: {str(e)}")
 
+    def export_docx(self):
+        if not getattr(self, "last_result", None):
+            messagebox.showwarning("No data", "Transcribe first.")
+            return
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word", "*.docx")])
+        if not path:
+            return
+        try:
+            MeetingTranscriber.export_docx(self.last_result, path)
+            messagebox.showinfo("Saved", f"Saved to {path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def export_pdf(self):
+        if not getattr(self, "last_result", None):
+            messagebox.showwarning("No data", "Transcribe first.")
+            return
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if not path:
+            return
+        try:
+            MeetingTranscriber.export_pdf(self.last_result, path)
+            messagebox.showinfo("Saved", f"Saved to {path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
     def copy_log(self):
         try:
             content = self.log_text.get("1.0", tk.END)
             self.root.clipboard_clear()
             self.root.clipboard_append(content)
             messagebox.showinfo("Copied", "Log copied to clipboard.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def export_docx(self):
+        if not getattr(self, "last_result", None):
+            messagebox.showwarning("No data", "Transcribe first.")
+            return
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word", "*.docx")])
+        if not path:
+            return
+        try:
+            MeetingTranscriber.export_docx(self.last_result, path)
+            messagebox.showinfo("Saved", f"Saved to {path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def export_pdf(self):
+        if not getattr(self, "last_result", None):
+            messagebox.showwarning("No data", "Transcribe first.")
+            return
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if not path:
+            return
+        try:
+            MeetingTranscriber.export_pdf(self.last_result, path)
+            messagebox.showinfo("Saved", f"Saved to {path}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
