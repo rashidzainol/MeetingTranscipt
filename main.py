@@ -4,7 +4,17 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
 import webbrowser
+import logging
+import traceback
 from tkcalendar import DateEntry
+
+# Configure file logging
+_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meeting_transcriber.log")
+logging.basicConfig(
+    filename=_LOG_FILE,
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
 from datetime import datetime
 from meeting_transcriber import MeetingTranscriber
 
@@ -138,6 +148,9 @@ class MeetingTranscriberApp:
         
         self.about_btn = ttk.Button(button_frame, text="ℹ️ About", command=self.show_about)
         self.about_btn.pack(side=tk.LEFT, padx=5)
+
+        self.copy_log_btn = ttk.Button(button_frame, text="📋 Copy Log", command=self.copy_log)
+        self.copy_log_btn.pack(side=tk.LEFT, padx=5)
         
         # Configure row weights for proper resizing
         main_frame.rowconfigure(9, weight=1)
@@ -237,9 +250,12 @@ class MeetingTranscriberApp:
             messagebox.showinfo("Success", "Transcription completed successfully!")
             
         except Exception as e:
+            tb = traceback.format_exc()
             error_msg = f"Error during transcription: {str(e)}"
             self.log_message(error_msg)
-            messagebox.showerror("Error", error_msg)
+            self.log_message(tb)
+            logging.exception("Transcription failed")
+            messagebox.showerror("Error", error_msg + "\n\nFull details saved to:\n" + _LOG_FILE)
         finally:
             # Re-enable buttons
             self.transcribe_btn.config(state="normal")
@@ -261,6 +277,24 @@ class MeetingTranscriberApp:
             editor_app = TranscriptEditor(editor_window, transcript_path=path)
         except Exception as e:
             messagebox.showerror("Error", f"Cannot open editor: {str(e)}")
+
+    def copy_log(self):
+        try:
+            content = self.log_text.get("1.0", tk.END)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(content)
+            messagebox.showinfo("Copied", "Log copied to clipboard.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def copy_log(self):
+        try:
+            content = self.log_text.get("1.0", tk.END)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(content)
+            messagebox.showinfo("Copied", "Log copied to clipboard.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def show_about(self):
         about = tk.Toplevel(self.root)
