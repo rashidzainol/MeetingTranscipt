@@ -20,8 +20,19 @@ class MeetingTranscriberApp:
     
     def setup_ui(self):
         """Create the user interface"""
+        # Apply a modern ttk theme
+        style = ttk.Style()
+        try:
+            style.theme_use('clam')
+        except Exception:
+            pass
+        style.configure('TButton', padding=6, font=('Segoe UI', 10))
+        style.configure('TLabel', font=('Segoe UI', 10))
+        style.configure('TLabelframe.Label', font=('Segoe UI', 10, 'bold'))
+        style.configure('Title.TLabel', font=('Segoe UI', 16, 'bold'), foreground='#2b3a67')
+
         # Main frame
-        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame = ttk.Frame(self.root, padding="16")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Configure grid weights
@@ -31,7 +42,7 @@ class MeetingTranscriberApp:
         
         # Title
         title_label = ttk.Label(main_frame, text="Meeting Audio Transcriber", 
-                               font=("Arial", 16, "bold"))
+                               style='Title.TLabel')
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
         # Audio file selection
@@ -41,7 +52,7 @@ class MeetingTranscriberApp:
         self.file_entry = ttk.Entry(main_frame, textvariable=self.file_path_var, width=50)
         self.file_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=(5, 5))
         
-        self.browse_btn = ttk.Button(main_frame, text="Browse", command=self.browse_audio_file)
+        self.browse_btn = ttk.Button(main_frame, text="📂 Browse", command=self.browse_audio_file)
         self.browse_btn.grid(row=1, column=2, pady=5)
         
         # Meeting info
@@ -116,19 +127,16 @@ class MeetingTranscriberApp:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=10, column=0, columnspan=3, pady=10)
         
-        self.transcribe_btn = ttk.Button(button_frame, text="Start Transcription", 
-                                        command=self.start_transcription)
+        self.transcribe_btn = ttk.Button(button_frame, text="▶ Start", command=self.start_transcription)
         self.transcribe_btn.pack(side=tk.LEFT, padx=5)
         
-        self.open_editor_btn = ttk.Button(button_frame, text="Open Transcript Editor", 
-                                         command=self.open_editor, state="disabled")
+        self.open_editor_btn = ttk.Button(button_frame, text="📝 Editor", command=self.open_editor, state="disabled")
         self.open_editor_btn.pack(side=tk.LEFT, padx=5)
         
-        self.clear_log_btn = ttk.Button(button_frame, text="Clear Log", 
-                                       command=self.clear_log)
+        self.clear_log_btn = ttk.Button(button_frame, text="🧹 Clear Log", command=self.clear_log)
         self.clear_log_btn.pack(side=tk.LEFT, padx=5)
         
-        self.about_btn = ttk.Button(button_frame, text="About", command=self.show_about)
+        self.about_btn = ttk.Button(button_frame, text="ℹ️ About", command=self.show_about)
         self.about_btn.pack(side=tk.LEFT, padx=5)
         
         # Configure row weights for proper resizing
