@@ -17,14 +17,17 @@ logging.basicConfig(
 )
 from datetime import datetime
 from meeting_transcriber import MeetingTranscriber
+from version_check import APP_VERSION, RELEASES_PAGE, check_for_update, is_newer
 
 class MeetingTranscriberApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Meeting Transcriber v1.0")
+        self.root.title(f"Meeting Transcriber v{APP_VERSION}")
         self.root.geometry("800x600")
         self.transcriber = None
         self.current_audio_file = ""
+        self.latest_version = None
+        self.latest_url = None
         
         self.setup_ui()
     
@@ -154,6 +157,9 @@ class MeetingTranscriberApp:
 
         self.copy_log_btn = ttk.Button(button_frame, text="📋 Copy Log", command=self.copy_log)
         self.copy_log_btn.pack(side=tk.LEFT, padx=5)
+
+        self.check_update_btn = ttk.Button(button_frame, text="🔄 Check Update", command=self.check_update)
+        self.check_update_btn.pack(side=tk.LEFT, padx=5)
 
         self.export_docx_btn = ttk.Button(button_frame, text="📄 Word", command=self.export_docx, state="disabled")
         self.export_docx_btn.pack(side=tk.LEFT, padx=5)
@@ -387,16 +393,44 @@ class MeetingTranscriberApp:
             self.stop_event.set()
             self.log_message("Stop requested...")
 
+    def check_update(self):
+        self.check_update_btn.config(state="disabled")
+        self.log_message("Checking for updates...")
+        threading.Thread(target=self._check_update_thread, daemon=True).start()
+
+    def _check_update_thread(self):
+        latest, url, notes = check_for_update()
+        self.root.after(0, lambda: self._update_done(latest, url, notes))
+
+    def _update_done(self, latest, url, notes):
+        self.check_update_btn.config(state="normal")
+        if not latest:
+            self.log_message("Update check failed (offline?)")
+            return
+        self.latest_version = latest
+        self.latest_url = url
+        if is_newer(latest, APP_VERSION):
+            msg = f"New version {latest} available! (Current: v{APP_VERSION})"
+            self.log_message(msg)
+            if messagebox.askyesno("Update Available", msg + "\n\nOpen download page?"):
+                webbrowser.open(url or RELEASES_PAGE)
+        else:
+            self.log_message(f"You are up to date (v{APP_VERSION}).")
+            messagebox.showinfo("Up to date", f"Current version: v{APP_VERSION}\nLatest: {latest}\nNo update needed.")
+
     def show_about(self):
         about = tk.Toplevel(self.root)
         about.title("About Meeting Transcriber")
-        about.geometry("420x260")
-        ttk.Label(about, text="Meeting Transcriber v1.0", font=("Arial", 14, "bold")).pack(pady=(15,5))
+        about.geometry("460x300")
+        ttk.Label(about, text=f"Meeting Transcriber v{APP_VERSION}", font=("Arial", 14, "bold")).pack(pady=(15,5))
         ttk.Label(about, text="Transcribe meetings with timestamps (EN/BM).").pack()
         ttk.Label(about, text="Developer: Rashid Zainol - JANN Sarawak").pack(pady=5)
         link = ttk.Label(about, text="GitHub: rashidzainol/MeetingTranscipt", foreground="blue", cursor="hand2")
         link.pack(pady=5)
         link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/rashidzainol/MeetingTranscipt"))
+        latest_text = self.latest_version if self.latest_version else "Not checked yet"
+        ttk.Label(about, text=f"Latest version: {latest_text}").pack(pady=5)
+        ttk.Button(about, text="Check Update", command=self.check_update).pack(pady=4)
         ttk.Button(about, text="Close", command=about.destroy).pack(pady=10)
 
 if __name__ == "__main__":
