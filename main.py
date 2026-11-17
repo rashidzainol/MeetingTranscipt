@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
+from datetime import datetime
 from meeting_transcriber import MeetingTranscriber
 
 class MeetingTranscriberApp:
@@ -46,10 +47,25 @@ class MeetingTranscriberApp:
         self.meeting_name_var = tk.StringVar()
         self.meeting_name_entry = ttk.Entry(main_frame, textvariable=self.meeting_name_var, width=50)
         self.meeting_name_entry.grid(row=2, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        
+
+        ttk.Label(main_frame, text="Meeting Date:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.meeting_date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.meeting_date_entry = ttk.Entry(main_frame, textvariable=self.meeting_date_var, width=50)
+        self.meeting_date_entry.grid(row=3, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Start Time (HH:MM):").grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.start_time_var = tk.StringVar(value=datetime.now().strftime("%H:%M"))
+        self.start_time_entry = ttk.Entry(main_frame, textvariable=self.start_time_var, width=50)
+        self.start_time_entry.grid(row=4, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Participants:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.participants_var = tk.StringVar()
+        self.participants_entry = ttk.Entry(main_frame, textvariable=self.participants_var, width=50)
+        self.participants_entry.grid(row=5, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
         # Settings frame
         settings_frame = ttk.LabelFrame(main_frame, text="Transcription Settings", padding="10")
-        settings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        settings_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
         settings_frame.columnconfigure(1, weight=1)
         
         # Model selection
@@ -65,10 +81,17 @@ class MeetingTranscriberApp:
         self.chunk_size_var = tk.StringVar(value="5")
         chunk_spin = ttk.Spinbox(settings_frame, from_=1, to=30, textvariable=self.chunk_size_var, width=15)
         chunk_spin.grid(row=1, column=1, sticky=tk.W, pady=2)
+
+        # Language
+        ttk.Label(settings_frame, text="Language:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.lang_var = tk.StringVar(value="auto")
+        lang_combo = ttk.Combobox(settings_frame, textvariable=self.lang_var,
+                                  values=["auto", "en", "ms"], state="readonly", width=15)
+        lang_combo.grid(row=2, column=1, sticky=tk.W, pady=2)
         
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
-        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        progress_frame.grid(row=7, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
         progress_frame.columnconfigure(0, weight=1)
         
         self.progress_var = tk.StringVar(value="Ready")
@@ -79,13 +102,13 @@ class MeetingTranscriberApp:
         self.progress.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
         
         # Log output
-        ttk.Label(main_frame, text="Processing Log:").grid(row=5, column=0, sticky=tk.W, pady=(10, 0))
+        ttk.Label(main_frame, text="Processing Log:").grid(row=8, column=0, sticky=tk.W, pady=(10, 0))
         self.log_text = scrolledtext.ScrolledText(main_frame, height=15, width=80)
-        self.log_text.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        self.log_text.grid(row=9, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         
         # Buttons frame
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=7, column=0, columnspan=3, pady=10)
+        button_frame.grid(row=10, column=0, columnspan=3, pady=10)
         
         self.transcribe_btn = ttk.Button(button_frame, text="Start Transcription", 
                                         command=self.start_transcription)
@@ -100,7 +123,7 @@ class MeetingTranscriberApp:
         self.clear_log_btn.pack(side=tk.LEFT, padx=5)
         
         # Configure row weights for proper resizing
-        main_frame.rowconfigure(6, weight=1)
+        main_frame.rowconfigure(9, weight=1)
     
     def browse_audio_file(self):
         """Browse for audio file"""
@@ -155,34 +178,44 @@ class MeetingTranscriberApp:
             self.log_message("Initializing transcriber...")
             
             # Initialize transcriber
-            self.transcriber = MeetingTranscriber(model_size=self.model_var.get())
+            self.transcriber = MeetingTranscriber(model_size=self.model_var.get(), language=self.lang_var.get())
             
             # Set progress callback
             self.transcriber.set_progress_callback(self.update_progress)
             
             # Start transcription
             audio_file = self.file_path_var.get()
-            meeting_name = self.meeting_name_var.get()
+            meeting_name = self.meeting_name_var.get() or os.path.splitext(os.path.basename(audio_file))[0]
             chunk_size = int(self.chunk_size_var.get())
+            meeting_date = self.meeting_date_var.get()
+            start_time = self.start_time_var.get()
+            participants = [p.strip() for p in self.participants_var.get().split(",") if p.strip()]
             
             self.log_message(f"Starting transcription for: {meeting_name}")
             self.log_message(f"Audio file: {os.path.basename(audio_file)}")
             self.log_message(f"Chunk size: {chunk_size} minutes")
+            self.log_message(f"Language: {self.lang_var.get()}")
             self.log_message("-" * 50)
             
             result = self.transcriber.transcribe_meeting(
                 audio_path=audio_file,
                 meeting_name=meeting_name,
-                chunk_length_min=chunk_size
+                chunk_length_min=chunk_size,
+                meeting_date=meeting_date,
+                start_time=start_time,
+                participants=participants
             )
             
             self.log_message("-" * 50)
             self.log_message("Transcription completed successfully!")
             self.log_message(f"Chunks created: {result['chunks_created']}")
+            self.log_message(f"Start: {result['start_time']}  End: {result['end_time']}  Duration: {round(result['duration_seconds']/60,1)} min")
+            self.log_message(f"Detected language: {result['detected_language']}")
             self.log_message(f"Output folder: {result['output_folder']}")
             
             # Enable editor button
             self.open_editor_btn.config(state="normal")
+            self.last_transcript_path = os.path.join(result['output_folder'], f"{meeting_name}_transcript.json")
             
             messagebox.showinfo("Success", "Transcription completed successfully!")
             
@@ -207,7 +240,8 @@ class MeetingTranscriberApp:
         try:
             from transcript_editor import TranscriptEditor
             editor_window = tk.Toplevel(self.root)
-            editor_app = TranscriptEditor(editor_window)
+            path = getattr(self, "last_transcript_path", None)
+            editor_app = TranscriptEditor(editor_window, transcript_path=path)
         except Exception as e:
             messagebox.showerror("Error", f"Cannot open editor: {str(e)}")
 
