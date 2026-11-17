@@ -2,14 +2,36 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
+import sys
 import threading
 import webbrowser
 import logging
 import traceback
 from tkcalendar import DateEntry
 
-# Configure file logging
-_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meeting_transcriber.log")
+
+def _app_data_dir():
+    """Persistent folder for the log file.
+
+    When frozen by PyInstaller, ``__file__`` points inside a temp folder that is
+    deleted on exit, so the log must live somewhere permanent.
+    """
+    if getattr(sys, "frozen", False):
+        base = os.path.join(
+            os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+            "MeetingTranscriber",
+        )
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        pass
+    return base
+
+
+APP_DIR = _app_data_dir()
+_LOG_FILE = os.path.join(APP_DIR, "meeting_transcriber.log")
 logging.basicConfig(
     filename=_LOG_FILE,
     level=logging.DEBUG,
@@ -157,6 +179,9 @@ class MeetingTranscriberApp:
 
         self.copy_log_btn = ttk.Button(button_frame, text="📋 Copy Log", command=self.copy_log)
         self.copy_log_btn.pack(side=tk.LEFT, padx=5)
+
+        self.open_log_btn = ttk.Button(button_frame, text="📂 Log Folder", command=self.open_log_folder)
+        self.open_log_btn.pack(side=tk.LEFT, padx=5)
 
         self.check_update_btn = ttk.Button(button_frame, text="🔄 Check Update", command=self.check_update)
         self.check_update_btn.pack(side=tk.LEFT, padx=5)
@@ -318,29 +343,58 @@ class MeetingTranscriberApp:
         if not getattr(self, "last_result", None):
             messagebox.showwarning("No data", "Transcribe first.")
             return
-        from tkinter import filedialog
-        path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word", "*.docx")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            initialfile=self._default_export_name(".docx"),
+            filetypes=[("Word document", "*.docx")],
+        )
         if not path:
             return
         try:
             MeetingTranscriber.export_docx(self.last_result, path)
-            messagebox.showinfo("Saved", f"Saved to {path}")
+            self.log_message(f"Word minutes saved: {path}")
+            messagebox.showinfo("Saved", f"Saved to:\n{path}")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            self._report_export_error("Word", e)
 
     def export_pdf(self):
         if not getattr(self, "last_result", None):
             messagebox.showwarning("No data", "Transcribe first.")
             return
-        from tkinter import filedialog
-        path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            initialfile=self._default_export_name(".pdf"),
+            filetypes=[("PDF document", "*.pdf")],
+        )
         if not path:
             return
         try:
             MeetingTranscriber.export_pdf(self.last_result, path)
-            messagebox.showinfo("Saved", f"Saved to {path}")
+            self.log_message(f"PDF minutes saved: {path}")
+            messagebox.showinfo("Saved", f"Saved to:\n{path}")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            self._report_export_error("PDF", e)
+
+    def _default_export_name(self, ext):
+        name = "meeting"
+        try:
+            name = self.last_result.get("meeting_name") or name
+        except Exception:
+            pass
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in name).strip()
+        return f"{safe or 'meeting'}_minutes{ext}"
+
+    def _report_export_error(self, kind, exc):
+        tb = traceback.format_exc()
+        self.log_message(f"{kind} export failed: {exc}")
+        self.log_message(tb)
+        logging.exception("%s export failed", kind)
+        messagebox.showerror(
+            "Export failed",
+            f"Could not create the {kind} file:\n{exc}\n\n"
+            f"Details were written to the log:\n{_LOG_FILE}\n\n"
+            "Use 'Copy Log' if you need to share the error.",
+        )
 
     def copy_log(self):
         try:
@@ -351,42 +405,11 @@ class MeetingTranscriberApp:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def export_docx(self):
-        if not getattr(self, "last_result", None):
-            messagebox.showwarning("No data", "Transcribe first.")
-            return
-        from tkinter import filedialog
-        path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word", "*.docx")])
-        if not path:
-            return
+    def open_log_folder(self):
         try:
-            MeetingTranscriber.export_docx(self.last_result, path)
-            messagebox.showinfo("Saved", f"Saved to {path}")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def export_pdf(self):
-        if not getattr(self, "last_result", None):
-            messagebox.showwarning("No data", "Transcribe first.")
-            return
-        from tkinter import filedialog
-        path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
-        if not path:
-            return
-        try:
-            MeetingTranscriber.export_pdf(self.last_result, path)
-            messagebox.showinfo("Saved", f"Saved to {path}")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def copy_log(self):
-        try:
-            content = self.log_text.get("1.0", tk.END)
-            self.root.clipboard_clear()
-            self.root.clipboard_append(content)
-            messagebox.showinfo("Copied", "Log copied to clipboard.")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            os.startfile(os.path.dirname(_LOG_FILE))
+        except Exception:
+            messagebox.showinfo("Log folder", os.path.dirname(_LOG_FILE))
 
     def stop_transcription(self):
         if getattr(self, "stop_event", None):

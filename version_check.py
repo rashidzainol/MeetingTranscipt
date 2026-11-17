@@ -3,7 +3,7 @@
 import json
 import urllib.request
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.9.0"
 REPO_OWNER = "rashidzainol"
 REPO_NAME = "MeetingTranscipt"
 GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"

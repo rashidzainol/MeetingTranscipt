@@ -210,62 +210,257 @@ class MeetingTranscriber:
         lines.append("")
         return "\n".join(lines)
 
+    # ------------------------------------------------------------------
+    # Export helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _prepare(result):
+        """Return the values every exporter needs, with safe fallbacks."""
+        duration = result.get("duration_seconds") or 0
+        try:
+            duration_txt = f"{round(float(duration) / 60, 1)} min"
+        except Exception:
+            duration_txt = "-"
+        return {
+            "name": result.get("meeting_name") or "Meeting",
+            "date": result.get("meeting_date") or "-",
+            "start": result.get("start_time") or "-",
+            "end": result.get("end_time") or "-",
+            "duration": duration_txt,
+            "language": result.get("detected_language") or "-",
+            "participants": ", ".join(result.get("participants") or []) or "-",
+            "segments": result.get("segments") or [],
+        }
+
     @staticmethod
     def export_docx(result, path):
         try:
             from docx import Document
-        except Exception:
-            raise RuntimeError("python-docx not installed. Run: pip install python-docx")
+            from docx.shared import Pt
+        except Exception as exc:  # pragma: no cover - depends on environment
+            raise RuntimeError(
+                "python-docx is not installed. Run: pip install python-docx\n" + str(exc)
+            )
+        data = MeetingTranscriber._prepare(result)
+
         doc = Document()
-        doc.add_heading(f"Meeting Minutes — {result['meeting_name']}", 0)
+        try:
+            doc.styles["Normal"].font.name = "Calibri"
+            doc.styles["Normal"].font.size = Pt(11)
+        except Exception:
+            pass
+
+        doc.add_heading(f"Meeting Minutes — {data['name']}", 0)
+        doc.add_paragraph(f"Date: {data['date']}   |   {data['start']} – {data['end']}")
+
+        # Meeting details table
+        doc.add_heading("1. Meeting Details", level=1)
         table = doc.add_table(rows=0, cols=2)
-        table.style = 'Table Grid'
-        for k, v in [
-            ("Date", result['meeting_date']),
-            ("Start Time", result['start_time']),
-            ("End Time", result['end_time']),
-            ("Duration", f"{round(result['duration_seconds']/60,1)} min"),
-            ("Language", result['detected_language']),
-            ("Participants", ", ".join(result.get('participants', []))),
+        table.style = "Table Grid"
+        for key, value in [
+            ("Meeting", data["name"]),
+            ("Date", data["date"]),
+            ("Start Time", data["start"]),
+            ("End Time", data["end"]),
+            ("Duration", data["duration"]),
+            ("Language", data["language"]),
+            ("Participants", data["participants"]),
         ]:
             row = table.add_row().cells
-            row[0].text = k
-            row[1].text = str(v)
-        doc.add_heading("Transcript", level=1)
-        for seg in result["segments"]:
+            row[0].text = key
+            row[1].text = str(value)
+            for run in row[0].paragraphs[0].runs:
+                run.bold = True
+
+        # Agenda
+        doc.add_heading("2. Agenda", level=1)
+        doc.add_paragraph("1. (Add agenda items here)")
+
+        # Discussion / transcript
+        doc.add_heading("3. Discussion / Perbincangan", level=1)
+        if not data["segments"]:
+            doc.add_paragraph("(No transcript available)")
+        for seg in data["segments"]:
             p = doc.add_paragraph()
-            p.add_run(f"[{MeetingTranscriber._fmt_ts(seg['start'])}] ").bold = True
-            p.add_run(seg["text"])
-        doc.add_heading("Minutes / Action Items", level=1)
-        doc.add_paragraph("Decisions and action items to be filled in.")
+            p.add_run(f"[{MeetingTranscriber._fmt_ts(seg.get('start', 0))}] ").bold = True
+            p.add_run(str(seg.get("text", "")).strip())
+
+        # Decisions
+        doc.add_heading("4. Decisions / Keputusan", level=1)
+        doc.add_paragraph("• (Record decisions here)")
+
+        # Action items
+        doc.add_heading("5. Action Items / Tindakan", level=1)
+        actions = doc.add_table(rows=1, cols=5)
+        actions.style = "Table Grid"
+        for cell, label in zip(actions.rows[0].cells, ["#", "Action", "Owner", "Due Date", "Status"]):
+            cell.text = label
+            for run in cell.paragraphs[0].runs:
+                run.bold = True
+        blank = actions.add_row().cells
+        for cell, value in zip(blank, ["1", "", "", "", "Pending"]):
+            cell.text = value
+
+        # Next meeting
+        doc.add_heading("6. Next Meeting", level=1)
+        doc.add_paragraph("(Date / time of next meeting)")
+
+        doc.add_paragraph()
+        footer = doc.add_paragraph(
+            "Prepared by Meeting Transcriber — https://github.com/rashidzainol/MeetingTranscipt"
+        )
+        try:
+            for run in footer.runs:
+                run.font.size = Pt(8)
+                run.italic = True
+        except Exception:
+            pass
+
         doc.save(path)
+
+    @staticmethod
+    def _pdf_safe(text):
+        """Core PDF fonts are Latin-1 only, so normalise unsupported characters."""
+        text = str(text)
+        replacements = {
+            "\u2014": "-",
+            "\u2013": "-",
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2026": "...",
+            "\u2022": "-",
+            "\u00a0": " ",
+        }
+        for bad, good in replacements.items():
+            text = text.replace(bad, good)
+        return text.encode("latin-1", "replace").decode("latin-1")
 
     @staticmethod
     def export_pdf(result, path):
         try:
             from fpdf import FPDF
-        except Exception:
-            raise RuntimeError("fpdf2 not installed. Run: pip install fpdf2")
-        pdf = FPDF()
+            from fpdf.enums import XPos, YPos
+            from fpdf.fonts import FontFace
+        except Exception as exc:  # pragma: no cover - depends on environment
+            raise RuntimeError(
+                "fpdf2 is not installed. Run: pip install fpdf2\n" + str(exc)
+            )
+        data = MeetingTranscriber._prepare(result)
+        safe = MeetingTranscriber._pdf_safe
+
+        class MinutesPDF(FPDF):
+            def header(self):
+                if self.page_no() == 1:
+                    return
+                self.set_font("Helvetica", "I", 8)
+                self.set_text_color(130, 130, 130)
+                self.cell(0, 8, safe(data["name"]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.set_draw_color(220, 220, 220)
+                self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+                self.ln(2)
+
+            def footer(self):
+                self.set_y(-15)
+                self.set_font("Helvetica", "I", 8)
+                self.set_text_color(130, 130, 130)
+                self.cell(
+                    0, 10,
+                    safe(f"Page {self.page_no()}/{{nb}}  -  Meeting Transcriber"),
+                    align="C",
+                )
+
+        pdf = MinutesPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.set_margins(15, 15, 15)
+        pdf.alias_nb_pages()
         pdf.add_page()
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, f"Meeting Minutes - {result['meeting_name']}", ln=True)
-        pdf.set_font("Helvetica", size=11)
-        for k, v in [
-            ("Date", result['meeting_date']),
-            ("Start", result['start_time']),
-            ("End", result['end_time']),
-            ("Duration", f"{round(result['duration_seconds']/60,1)} min"),
-            ("Language", result['detected_language']),
-        ]:
-            pdf.cell(0, 8, f"{k}: {v}", ln=True)
+
+        # Title
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_text_color(43, 58, 103)
+        pdf.multi_cell(0, 9, safe(f"Meeting Minutes - {data['name']}"))
+        pdf.set_draw_color(43, 58, 103)
+        pdf.set_line_width(0.6)
+        pdf.line(15, pdf.get_y() + 1, 195, pdf.get_y() + 1)
         pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, "Transcript", ln=True)
-        pdf.set_font("Helvetica", size=10)
-        for seg in result["segments"]:
-            pdf.multi_cell(0, 6, f"[{MeetingTranscriber._fmt_ts(seg['start'])}] {seg['text']}")
+        pdf.set_text_color(0, 0, 0)
+
+        def section(title):
+            pdf.ln(3)
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(43, 58, 103)
+            pdf.cell(0, 8, safe(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(0, 0, 0)
+
+        def body(text, h=5.5):
+            pdf.set_font("Helvetica", size=10.5)
+            pdf.multi_cell(0, h, safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # Meeting details
+        section("1. Meeting Details")
+        pdf.set_font("Helvetica", size=10.5)
+        for key, value in [
+            ("Meeting", data["name"]),
+            ("Date", data["date"]),
+            ("Start Time", data["start"]),
+            ("End Time", data["end"]),
+            ("Duration", data["duration"]),
+            ("Language", data["language"]),
+            ("Participants", data["participants"]),
+        ]:
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.cell(33, 6.5, safe(f"{key}:"), new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.set_font("Helvetica", size=10.5)
+            pdf.multi_cell(0, 6.5, safe(value), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # Agenda
+        section("2. Agenda")
+        body("1. (Add agenda items here)")
+
+        # Transcript
+        section("3. Discussion / Perbincangan")
+        if not data["segments"]:
+            body("(No transcript available)")
+        for seg in data["segments"]:
+            pdf.set_font("Helvetica", "B", 9.5)
+            pdf.set_text_color(90, 90, 90)
+            pdf.cell(
+                0, 5.5,
+                safe(f"[{MeetingTranscriber._fmt_ts(seg.get('start', 0))}]"),
+                new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+            )
+            pdf.set_text_color(0, 0, 0)
+            body(seg.get("text", ""), h=5.5)
+            pdf.ln(1)
+
+        # Decisions
+        section("4. Decisions / Keputusan")
+        body("- (Record decisions here)")
+
+        # Action items
+        section("5. Action Items / Tindakan")
+        pdf.set_font("Helvetica", size=9.5)
+        with pdf.table(
+            col_widths=(8, 62, 30, 30, 25),
+            text_align=("CENTER", "LEFT", "LEFT", "LEFT", "CENTER"),
+            line_height=6,
+            headings_style=FontFace(emphasis="BOLD"),
+        ) as table:
+            header = table.row()
+            for label in ["#", "Action", "Owner", "Due Date", "Status"]:
+                header.cell(safe(label))
+            row = table.row()
+            for value in ["1", "", "", "", "Pending"]:
+                row.cell(safe(value))
+
+        # Next meeting
+        section("6. Next Meeting")
+        body("(Date / time of next meeting)")
+
         pdf.output(path)
+
 
     @staticmethod
     def _fmt_ts(seconds):
