@@ -12,5 +12,8 @@ tkcalendar>=1.6.1
 python-docx>=1.1.0
 fpdf2>=2.8.0
 
+# Utilities
+psutil>=5.9
+
 # Optional: speaker diarization
 # pyannote.audio>=3.1

@@ -6,15 +6,24 @@ import time
 import threading
 from datetime import datetime, timedelta
 
+try:
+    from version_check import APP_VERSION
+except Exception:  # pragma: no cover - version module is optional at import time
+    APP_VERSION = "1.10.0"
+
 
 class MeetingTranscriber:
-    def __init__(self, model_size="base", language="auto", progress_callback=None):
+    def __init__(self, model_size="base", language="auto", progress_callback=None,
+                 device="auto"):
         self.model_size = model_size
         self.language = language  # 'en', 'ms', or 'auto'
         self.progress_callback = progress_callback
         self.model = None
         self.backend = None
         self.stop_event = None
+        self.device_requested = device
+        self.device = "cpu"
+        self.compute_type = "int8"
         self._load_model()
 
     def _log(self, msg):
@@ -24,29 +33,92 @@ class MeetingTranscriber:
             except Exception:
                 pass
 
-    def _progress(self, pct, msg):
+    def _progress(self, pct, msg, detail=""):
         if self.progress_callback:
             try:
-                self.progress_callback({"type": "progress", "percent": pct, "message": msg})
+                self.progress_callback({
+                    "type": "progress",
+                    "percent": pct,
+                    "message": msg,
+                    "detail": detail,
+                })
             except Exception:
                 pass
 
     def _load_model(self):
-        self._log(f"Loading Whisper model '{self.model_size}'...")
+        t0 = time.time()
+        self._progress(2, f"Loading model '{self.model_size}'...",
+                       detail="The first run downloads the model (internet required once).")
+        self._log(f"Loading Whisper model '{self.model_size}' (requested device: {self.device_requested})...")
+
+        # faster-whisper can use an NVIDIA GPU (CUDA) which is far faster than CPU.
+        if self.device_requested == "auto":
+            try:
+                import ctranslate2
+                if ctranslate2.get_cuda_device_count() > 0:
+                    self.device, self.compute_type = "cuda", "float16"
+            except Exception:
+                pass
+        else:
+            self.device = self.device_requested
+            self.compute_type = "float16" if self.device == "cuda" else "int8"
+
+        WhisperModel = None
         try:
             from faster_whisper import WhisperModel
+        except Exception as exc:
+            self._log(f"faster-whisper not available ({exc}).")
+
+        if WhisperModel is not None:
             self.backend = "faster"
-            self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-        except Exception:
+            try:
+                self.model = WhisperModel(
+                    self.model_size, device=self.device, compute_type=self.compute_type
+                )
+            except Exception as first_exc:
+                if self.device != "cpu":
+                    self._log(
+                        f"GPU could not be used ({first_exc}). Falling back to CPU (int8)."
+                    )
+                    self.device, self.compute_type = "cpu", "int8"
+                    self.model = WhisperModel(
+                        self.model_size, device="cpu", compute_type="int8"
+                    )
+                else:
+                    raise
+        else:
+            self._log("Falling back to openai-whisper (slower on CPU)...")
             try:
                 import whisper
                 self.backend = "openai"
+                self.device, self.compute_type = "cpu", "float32"
                 self.model = whisper.load_model(self.model_size)
             except Exception as e:
                 raise RuntimeError(
                     "No Whisper backend found. Install faster-whisper or openai-whisper.\n" + str(e)
                 )
-        self._log("Model loaded.")
+
+        elapsed = time.time() - t0
+        if self.backend == "faster":
+            self._log(
+                f"Backend ready: faster-whisper | device={self.device.upper()} | "
+                f"compute={self.compute_type} | model load={elapsed:.1f}s"
+            )
+            if self.device == "cpu":
+                self._log(
+                    "Running on CPU. An NVIDIA GPU with CUDA can be several times faster — "
+                    "see README → Performance."
+                )
+        else:
+            self._log(
+                f"Backend ready: openai-whisper | device=CPU | model load={elapsed:.1f}s"
+            )
+            self._log("Note: faster-whisper is usually 3-4x faster than openai-whisper on CPU.")
+        self._progress(
+            6, "Model ready",
+            detail=f"{self.backend} · {self.device.upper()} · {self.compute_type} · {elapsed:.1f}s",
+        )
+
 
     def _audio_duration(self, path):
         try:
@@ -77,10 +149,45 @@ class MeetingTranscriber:
         if start_time is None:
             start_time = datetime.now().strftime("%H:%M")
 
-        self._log(f"Transcribing: {os.path.basename(audio_path)}")
+        t_start = time.time()
+        try:
+            file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+        except Exception:
+            file_size_mb = 0.0
 
+        self._log("-" * 62)
+        self._log(f"Job: {meeting_name}")
+        self._log(f"File: {os.path.basename(audio_path)} ({file_size_mb:.1f} MB)")
+        self._log(
+            f"Model: {self.model_size} | Backend: {self.backend} | "
+            f"Device: {self.device.upper()} | Compute: {self.compute_type}"
+        )
+        self._log(f"Language: {self.language} | Participants: {len(participants or [])}")
+        try:
+            import shutil
+            free_gb = shutil.disk_usage(
+                os.path.dirname(os.path.abspath(audio_path))
+            ).free / (1024 ** 3)
+            self._log(f"Free disk space in output folder: {free_gb:.1f} GB")
+        except Exception:
+            pass
+
+        self._progress(8, "Reading audio...", detail="Checking duration and stream information.")
         duration = self._audio_duration(audio_path)
-        self._log(f"Audio duration: {round(duration/60, 1)} min")
+        if duration > 0:
+            self._log(f"Audio duration: {self._fmt_dur(duration)} ({duration / 60:.1f} min)")
+        else:
+            self._log("Audio duration: unknown (progress bar uses the last processed timestamp)")
+        try:
+            import av
+            with av.open(audio_path) as container:
+                stream = container.streams.audio[0]
+                self._log(
+                    f"Audio stream: {stream.codec_context.name} · {stream.rate} Hz · "
+                    f"{stream.channels} channel(s)"
+                )
+        except Exception:
+            self._log("Audio stream details: unavailable")
 
         lang = None if self.language == "auto" else self.language
 
@@ -88,10 +195,17 @@ class MeetingTranscriber:
         detected_lang = self.language
         cancelled = False
         t0 = time.time()
+        # Log less often on short audio and more often on very long recordings.
+        step = 0.05 if duration > 3600 else 0.10
+        next_log = step
 
+        self._log("Transcription started — this is the CPU/GPU intensive stage.")
         if self.backend == "faster":
+            self._progress(10, "Transcribing...", detail="Whisper is analysing the audio now.")
             segs, info = self.model.transcribe(audio_path, language=lang, beam_size=5)
             detected_lang = info.language
+            prob = getattr(info, "language_probability", 0) or 0
+            self._log(f"Detected language: {detected_lang} (probability {prob:.2f})")
             for s in segs:
                 if stop_event is not None and stop_event.is_set():
                     cancelled = True
@@ -101,20 +215,40 @@ class MeetingTranscriber:
                     "end": round(s.end, 2),
                     "text": s.text.strip(),
                 })
+                elapsed = time.time() - t0
                 if duration > 0:
-                    pct = min(99, int((s.end / duration) * 100))
-                    elapsed = time.time() - t0
-                    if s.end > 0 and elapsed > 0:
-                        speed = s.end / elapsed
-                        remaining = max(0, (duration - s.end) / speed)
-                        eta = time.strftime("%M:%S", time.gmtime(remaining))
-                    else:
-                        eta = "--:--"
-                    self._progress(pct, f"Transcribing... {pct}% (ETA {eta})")
+                    frac = min(1.0, s.end / duration)
+                    pct = min(99, int(frac * 100))
+                    speed = s.end / elapsed if elapsed > 0 else 0
+                    remaining = max(0.0, (duration - s.end) / speed) if speed > 0 else 0
+                    self._progress(
+                        10 + int(pct * 0.85),
+                        f"Transcribing... {pct}%",
+                        detail=(
+                            f"{self._fmt_dur(s.end)} of {self._fmt_dur(duration)} · "
+                            f"{speed:.1f}x realtime · ETA {self._fmt_dur(remaining)}"
+                        ),
+                    )
+                    if frac >= next_log:
+                        self._log(
+                            f"[{pct:3d}%] {self._fmt_dur(s.end)} / {self._fmt_dur(duration)} | "
+                            f"elapsed {self._fmt_dur(elapsed)} | {speed:.1f}x realtime | "
+                            f"ETA {self._fmt_dur(remaining)} | {len(segments)} segments"
+                        )
+                        next_log += step
+                elif len(segments) % 25 == 0:
+                    self._progress(
+                        20, f"Transcribing... {len(segments)} segments",
+                        detail=f"elapsed {self._fmt_dur(elapsed)}",
+                    )
         else:
-            self._progress(10, "Transcribing (openai-whisper)...")
+            self._progress(10, "Transcribing (openai-whisper)...",
+                           detail="openai-whisper reports progress when the pass finishes.")
+            self._log("openai-whisper is running (no live ETA — it finishes the whole file at once).")
             result = self.model.transcribe(audio_path, language=lang)
-            for s in result.get("segments", []):
+            all_segments = result.get("segments", [])
+            total = len(all_segments)
+            for idx, s in enumerate(all_segments, start=1):
                 if stop_event is not None and stop_event.is_set():
                     cancelled = True
                     break
@@ -123,16 +257,36 @@ class MeetingTranscriber:
                     "end": round(s["end"], 2),
                     "text": s["text"].strip(),
                 })
+                if total:
+                    self._progress(
+                        10 + int((idx / total) * 85),
+                        f"Collecting segments... {int(idx / total * 100)}%",
+                        detail=f"{idx} of {total} segments",
+                    )
             detected_lang = result.get("language", self.language)
-            self._progress(95, "Finalizing...")
+            self._log(f"Detected language: {detected_lang}")
+
+        pass_elapsed = time.time() - t0
+        self._log(f"Transcription pass finished in {self._fmt_dur(pass_elapsed)}.")
 
         if cancelled:
-            self._log("Transcription cancelled by user.")
+            self._log(
+                f"Stopped by user after {len(segments)} segments "
+                f"({self._fmt_dur(pass_elapsed)} elapsed)."
+            )
             raise RuntimeError("Cancelled by user")
 
-        self._progress(100, "Done")
+        if len(segments) == 0:
+            self._log("No speech segments were detected. The audio may be silent or unsupported.")
 
         duration_sec = segments[-1]["end"] if segments else 0
+        if duration_sec > 0 and pass_elapsed > 0:
+            speed = duration_sec / pass_elapsed
+            self._log(
+                f"Speed: {speed:.1f}x realtime ({pass_elapsed:.0f}s processing for "
+                f"{self._fmt_dur(duration_sec)} of audio, {len(segments)} segments)."
+            )
+
         try:
             start_dt = datetime.strptime(f"{meeting_date} {start_time}", "%Y-%m-%d %H:%M")
             end_dt = start_dt + timedelta(seconds=duration_sec)
@@ -151,21 +305,50 @@ class MeetingTranscriber:
             "chunks_created": 1,
             "segments": segments,
             "output_folder": os.path.dirname(os.path.abspath(audio_path)),
+            "app_version": APP_VERSION,
+            "backend": self.backend,
+            "device": self.device,
+            "compute_type": self.compute_type,
+            "model_size": self.model_size,
         }
 
         # Save JSON
+        self._progress(96, "Saving files...", detail="Writing transcript JSON and minutes Markdown.")
         out_json = os.path.join(result["output_folder"], f"{meeting_name}_transcript.json")
         with open(out_json, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        self._log(f"Saved transcript: {out_json}")
+        self._log(f"Saved JSON transcript: {out_json} ({os.path.getsize(out_json) / 1024:.1f} KB)")
 
         # Save Markdown minutes
         out_md = os.path.join(result["output_folder"], f"{meeting_name}_minutes.md")
         with open(out_md, "w", encoding="utf-8") as f:
             f.write(self.to_markdown(result))
-        self._log(f"Saved minutes: {out_md}")
+        self._log(f"Saved Markdown minutes: {out_md}")
+
+        total_elapsed = time.time() - t_start
+        self._progress(
+            100, "Completed",
+            detail=f"{len(segments)} segments · total {self._fmt_dur(total_elapsed)}",
+        )
+        self._log(f"All done in {self._fmt_dur(total_elapsed)}.")
 
         return result
+
+    @staticmethod
+    def _fmt_dur(seconds):
+        """Format seconds as 1h 02m 03s / 2m 05s / 7s."""
+        try:
+            seconds = int(max(0, float(seconds)))
+        except Exception:
+            seconds = 0
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h}h {m:02d}m {s:02d}s"
+        if m:
+            return f"{m}m {s:02d}s"
+        return f"{s}s"
+
 
     @staticmethod
     def to_markdown(result):

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set VERSION=1.9.0
+set VERSION=1.10.0
 cd /d "%~dp0"
 
 echo ============================================
@@ -52,3 +52,4 @@ echo.
 echo Build failed. Check the messages above.
 pause
 exit /b 1
+

@@ -3,7 +3,9 @@
 import json
 import urllib.request
 
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.10.0"
+APP_UPDATED = "18 November 2026"
+APP_COPYRIGHT = "© 2026 Rashid Zainol — JANN Sarawak. All rights reserved."
 REPO_OWNER = "rashidzainol"
 REPO_NAME = "MeetingTranscipt"
 GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"

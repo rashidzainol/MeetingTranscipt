@@ -3,10 +3,10 @@
 ;
 ; Expected build layout:
 ;   dist\installer_src\MeetingTranscriber\MeetingTranscriber.exe   (PyInstaller --onedir output)
-;   dist\MeetingTranscriber-v1.9.0.exe                             (portable onefile, optional)
+;   dist\MeetingTranscriber-v1.10.0.exe                           (portable onefile, optional)
 
 #define AppName "Meeting Transcriber"
-#define AppVersion "1.9.0"
+#define AppVersion "1.10.0"
 #define AppPublisher "Rashid Zainol - JANN Sarawak"
 #define AppURL "https://github.com/rashidzainol/MeetingTranscipt"
 #define AppExeName "MeetingTranscriber"
@@ -58,3 +58,4 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}.exe"; WorkingDi
 
 [Run]
 Filename: "{app}\{#AppExeName}.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
